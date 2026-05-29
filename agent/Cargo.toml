@@ -13,7 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 rdp-common = { path = "../common" }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -22,6 +22,9 @@ tracing-subscriber.workspace = true
 libvpx-sys = "1.4"
 webrtc = "0.10"
 bytes = "1"
+clap = { version = "4", features = ["derive"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

@@ -27,7 +27,7 @@ pub struct ReceivedVideoFrame {
 pub struct ClientPeer {
     peer_connection: Arc<RTCPeerConnection>,
     video_sender: mpsc::Sender<ReceivedVideoFrame>,
-    _video_receiver: mpsc::Receiver<ReceivedVideoFrame>,
+    video_receiver: Option<mpsc::Receiver<ReceivedVideoFrame>>,
 }
 
 impl ClientPeer {
@@ -52,13 +52,18 @@ impl ClientPeer {
         Ok(Self {
             peer_connection: Arc::new(peer_connection),
             video_sender: video_tx,
-            _video_receiver: video_rx,
+            video_receiver: Some(video_rx),
         })
     }
 
     /// Get a clone of the video frame sender channel
     pub fn video_sender(&self) -> mpsc::Sender<ReceivedVideoFrame> {
         self.video_sender.clone()
+    }
+
+    /// Take ownership of the video receiver channel
+    pub fn take_video_receiver(&mut self) -> Option<mpsc::Receiver<ReceivedVideoFrame>> {
+        self.video_receiver.take()
     }
 
     /// Create an answer SDP for the given offer

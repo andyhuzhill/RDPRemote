@@ -82,9 +82,18 @@ async fn handle_connection(socket: TcpStream, registry: Arc<DeviceRegistry>) {
                         let connect_msg = SignalingMessage::Connect {
                             target_device_id: device_id.clone(),
                         };
-                        let _ = target_tx
-                            .send(Message::Text(serde_json::to_string(&connect_msg).unwrap().into()))
-                            .await;
+                        match serde_json::to_string(&connect_msg) {
+                            Ok(json) => {
+                                if let Err(e) = target_tx.send(Message::Text(json.into())).await {
+                                    tracing::warn!("Failed to send connect to {}: {}", target_device_id, e);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to serialize connect message: {}", e);
+                            }
+                        }
+                    } else {
+                        tracing::warn!("Target device {} not found for connect", target_device_id);
                     }
                 }
                 Ok(SignalingMessage::Offer { .. })

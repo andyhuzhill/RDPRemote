@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 rdp-common = { path = "../common" }
-tokio.workspace = true
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "sync", "macros"] }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 serde.workspace = true

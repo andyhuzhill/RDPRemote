@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::time::Instant;
+use super::{CapturedFrame, ScreenCapture};
 use windows::{
     core::Interface,
     Win32::Graphics::{
@@ -21,21 +22,6 @@ use windows::{
     },
     Win32::Foundation::{DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, HWND, LRESULT, POINTL},
 };
-
-/// 捕获的帧数据
-#[derive(Debug, Clone)]
-pub struct CapturedFrame {
-    /// 帧宽度（像素）
-    pub width: u32,
-    /// 帧高度（像素）
-    pub height: u32,
-    /// 帧数据（BGRA 格式，每像素 4 字节）
-    pub data: Vec<u8>,
-    /// 行跨度（字节数）
-    pub stride: u32,
-    /// 时间戳（微秒）
-    pub timestamp_us: u64,
-}
 
 /// DXGI Desktop Duplication 屏幕捕获器
 pub struct D3D11ScreenCapture {
@@ -65,7 +51,7 @@ pub struct D3D11ScreenCapture {
 
 impl D3D11ScreenCapture {
     /// 创建新的 DXGI 屏幕捕获器
-    pub async fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let mut capture = D3D11ScreenCapture {
             factory: Default::default(),
             adapter: Default::default(),
@@ -80,12 +66,12 @@ impl D3D11ScreenCapture {
             initialized: false,
         };
         
-        capture.initialize().await?;
+        capture.initialize()?;
         Ok(capture)
     }
 
     /// 初始化 DXGI 和 D3D11
-    async fn initialize(&mut self) -> Result<()> {
+    fn initialize(&mut self) -> Result<()> {
         // 创建 DXGI 工厂
         self.factory = CreateDXGIFactory1::<IDXGIFactory1>()
             .context("Failed to create DXGI factory")?;
@@ -125,23 +111,7 @@ impl D3D11ScreenCapture {
                 None,
             )
         };
-
-        if device_result.is_err() {
-            // 尝试不带调试支持创建
-            let device_result = unsafe {
-                D3D11_CREATE_DEVICE(
-                    Some(&self.adapter),
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                    None,
-                    &mut feature_levels,
-                    None,
-                    None,
-                )
-            };
-            device_result.context("Failed to create D3D11 device")?;
-        }
-
-        self.device = device_result.unwrap();
+        self.device = device_result.context("Failed to create D3D11 device")?;
         self.context = self.device.GetImmediateContext();
 
         // 创建 staging texture
@@ -151,7 +121,10 @@ impl D3D11ScreenCapture {
             MipLevels: 1,
             ArraySize: 1,
             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: Default::default(),
+            SampleDesc: windows::Win32::Graphics::Dxgi_Common::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
             CPUAccessFlags: D3D11_MAP_READ,
@@ -378,9 +351,9 @@ mod tests {
         use crate::screen::dxgi::D3D11ScreenCapture;
         use crate::screen::ScreenCapture;
 
-        #[tokio::test]
-        async fn test_captured_frame_has_valid_dimensions() {
-            let mut capture = D3D11ScreenCapture::new().await.unwrap();
+        #[test]
+        fn test_captured_frame_has_valid_dimensions() {
+            let mut capture = D3D11ScreenCapture::new().unwrap();
             let (width, height) = capture.get_dimensions();
             
             // 屏幕尺寸应该大于0
@@ -388,10 +361,10 @@ mod tests {
             assert!(height > 0);
         }
 
-        #[tokio::test]
-        async fn test_capture_frame_returns_bgra_data() {
-            let mut capture = D3D11ScreenCapture::new().await.unwrap();
-            let frame = capture.capture_frame().await.unwrap();
+        #[test]
+        fn test_capture_frame_returns_bgra_data() {
+            let mut capture = D3D11ScreenCapture::new().unwrap();
+            let frame = capture.capture_frame().unwrap();
             
             // 检查帧数据格式
             assert!(frame.width > 0);
@@ -407,15 +380,15 @@ mod tests {
             assert!(frame.timestamp_us > 0);
         }
 
-        #[tokio::test]
-        async fn test_capture_frame_consistency() {
-            let mut capture = D3D11ScreenCapture::new().await.unwrap();
+        #[test]
+        fn test_capture_frame_consistency() {
+            let mut capture = D3D11ScreenCapture::new().unwrap();
             
             let (width1, height1) = capture.get_dimensions();
-            let frame1 = capture.capture_frame().await.unwrap();
+            let frame1 = capture.capture_frame().unwrap();
             
             let (width2, height2) = capture.get_dimensions();
-            let frame2 = capture.capture_frame().await.unwrap();
+            let frame2 = capture.capture_frame().unwrap();
             
             // 维度应该保持一致
             assert_eq!(width1, width2);

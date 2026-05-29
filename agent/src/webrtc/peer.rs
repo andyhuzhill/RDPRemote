@@ -16,6 +16,8 @@ use webrtc::{
     media::Sample,
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
     ice_transport::ice_candidate::RTCIceCandidate,
+    ice_transport::ice_server::RTCIceServer,
+    ice_transport::ice_credential_type::RTCIceCredentialType,
 };
 
 use crate::webrtc::{Error, Result};
@@ -40,9 +42,26 @@ impl AgentPeer {
             .with_interceptor_registry(registry)
             .build();
 
-        // Create peer connection configuration (no STUN/TURN for direct connection)
+        // Create peer connection configuration with STUN/TURN servers
+        // STUN server for NAT traversal discovery
+        // TURN server for relay when direct connection fails
         let config = RTCConfiguration {
-            ice_servers: vec![],
+            ice_servers: vec![
+                // STUN server (public Google STUN)
+                RTCIceServer {
+                    urls: vec!["stun:stun.l.google.com:19302".to_string()],
+                    username: String::new(),
+                    credential: String::new(),
+                    credential_type: RTCIceCredentialType::Unspecified,
+                },
+                // TURN server (local testing)
+                RTCIceServer {
+                    urls: vec!["turn:localhost:3478".to_string()],
+                    username: "rdpremote".to_string(),
+                    credential: "rdpremote123".to_string(),
+                    credential_type: RTCIceCredentialType::Password,
+                },
+            ],
             ..Default::default()
         };
 

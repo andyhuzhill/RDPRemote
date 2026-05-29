@@ -5,6 +5,7 @@ use webrtc::api::{APIBuilder, API};
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_gathering_state::RTCIceGatheringState;
+use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
@@ -43,8 +44,26 @@ impl ClientPeer {
             .with_interceptor_registry(interceptor_registry)
             .build();
 
-        // Create peer connection configuration
-        let config = RTCConfiguration::default();
+        // Create peer connection configuration with STUN/TURN servers
+        // STUN server for NAT traversal discovery
+        // TURN server for relay when direct connection fails
+        let config = RTCConfiguration {
+            ice_servers: vec![
+                // STUN server (public Google STUN)
+                RTCIceServer {
+                    urls: vec!["stun:stun.l.google.com:19302".to_string()],
+                    username: String::new(),
+                    credential: String::new(),
+                },
+                // TURN server (local testing)
+                RTCIceServer {
+                    urls: vec!["turn:localhost:3478".to_string()],
+                    username: "rdpremote".to_string(),
+                    credential: "rdpremote123".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
 
         // Create peer connection
         let peer_connection = api.new_peer_connection(config).await?;

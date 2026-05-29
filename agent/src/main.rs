@@ -1,5 +1,7 @@
 use tracing_subscriber::FmtSubscriber;
 
+mod screen;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     FmtSubscriber::builder().with_max_level(tracing::Level::INFO).init();

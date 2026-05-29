@@ -32,7 +32,7 @@ async fn handle_connection(socket: TcpStream, registry: Arc<DeviceRegistry>) {
             return;
         }
     };
-    let (mut tx, mut rx) = ws_stream.split();
+    let (tx, mut rx) = ws_stream.split();
 
     // 处理注册消息
     let register_msg = match rx.next().await {
@@ -46,6 +46,7 @@ async fn handle_connection(socket: TcpStream, registry: Arc<DeviceRegistry>) {
     let device_id = match parse_register(&register_msg) {
         Some(id) => id,
         None => {
+            let mut tx = tx;
             let _ = tx.send(Message::Text(r#"{"type":"error","message":"invalid register"}"#.into())).await;
             return;
         }
@@ -56,14 +57,17 @@ async fn handle_connection(socket: TcpStream, registry: Arc<DeviceRegistry>) {
     registry.insert(device_id.clone(), msg_tx);
     tracing::info!("Device {} registered", device_id);
 
-    // 启动消息转发任务（预留扩展点）
-    tokio::spawn(async move {
-        while let Some(_msg) = msg_rx.recv().await {
-            // 预留：可以在这里实现更复杂的消息处理逻辑
+    // 启动发送任务：将来自通道的消息发送到 WebSocket
+    let mut tx = tx;
+    let send_task = tokio::spawn(async move {
+        while let Some(msg) = msg_rx.recv().await {
+            if tx.send(msg).await.is_err() {
+                break;
+            }
         }
     });
 
-    // 处理传入的消息
+    // 处理接收到的消息
     while let Some(msg_result) = rx.next().await {
         let msg = match msg_result {
             Ok(m) => m,
@@ -71,18 +75,36 @@ async fn handle_connection(socket: TcpStream, registry: Arc<DeviceRegistry>) {
         };
 
         if let Message::Text(text) = &msg {
-            if let Some(target_id) = parse_connect(text) {
-                // 转发消息到目标设备
-                if let Some(target_tx) = registry.get(&target_id) {
-                    let _ = target_tx.send(msg.clone()).await;
+            match serde_json::from_str::<SignalingMessage>(text) {
+                Ok(SignalingMessage::Connect { target_device_id }) => {
+                    // 转发 Connect 消息到目标设备
+                    if let Some(target_tx) = registry.get(&target_device_id) {
+                        let connect_msg = SignalingMessage::Connect {
+                            target_device_id: device_id.clone(),
+                        };
+                        let _ = target_tx
+                            .send(Message::Text(serde_json::to_string(&connect_msg).unwrap().into()))
+                            .await;
+                    }
+                }
+                Ok(SignalingMessage::Offer { .. })
+                | Ok(SignalingMessage::Answer { .. })
+                | Ok(SignalingMessage::IceCandidate { .. }) => {
+                    // 广播信令消息给其他设备
+                    for entry in registry.iter() {
+                        if entry.key() != &device_id {
+                            let _ = entry.value().send(msg.clone()).await;
+                        }
+                    }
+                }
+                _ => {
+                    // 忽略其他消息类型
                 }
             }
         }
-
-        // 回显消息（简单测试用）
-        let _ = tx.send(msg).await;
     }
 
+    send_task.abort();
     registry.remove(&device_id);
     tracing::info!("Device {} disconnected", device_id);
 }
@@ -95,10 +117,3 @@ fn parse_register(text: &str) -> Option<String> {
     }
 }
 
-fn parse_connect(text: &str) -> Option<String> {
-    let msg: SignalingMessage = serde_json::from_str(text).ok()?;
-    match msg {
-        SignalingMessage::Connect { target_device_id } => Some(target_device_id),
-        _ => None,
-    }
-}

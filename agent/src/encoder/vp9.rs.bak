@@ -170,28 +170,6 @@ impl VP9Encoder {
     }
 }
 
-impl VP9Encoder {
-    /// 动态调整编码分辨率
-    pub fn set_resolution(&mut self, width: u32, height: u32) -> Result<()> {
-        if width % 2 != 0 || height % 2 != 0 {
-            return Err(anyhow!("Width and height must be even numbers"));
-        }
-        
-        self.width = width;
-        self.height = height;
-        
-        // 重新分配 I420 缓冲区
-        let width_usize = width as usize;
-        let height_usize = height as usize;
-        let y_size = width_usize * height_usize;
-        let uv_size = (width_usize / 2) * (height_usize / 2);
-        self.i420_buffer = vec![0u8; y_size + uv_size * 2];
-        
-        tracing::info!("Encoder resolution changed to {}x{}", width, height);
-        Ok(())
-    }
-}
-
 impl Drop for VP9Encoder {
     fn drop(&mut self) {
         unsafe {
@@ -339,6 +317,163 @@ impl VideoEncoder for VP9Encoder {
 
     fn force_keyframe(&mut self) {
         self.force_keyframe = true;
+    }
+
+    fn set_resolution(&mut self, width: u32, height: u32) -> Result<()> {
+        // Validate dimensions (must be even for YUV)
+        if width % 2 != 0 || height % 2 != 0 {
+            return Err(anyhow!("Width and height must be even numbers"));
+        }
+
+        unsafe {
+            // Destroy the old encoder context
+            vpx_sys::vpx_codec_destroy(&mut self.ctx);
+
+            // Get VP9 encoder interface
+            let iface = vpx_sys::vpx_codec_vp9_cx();
+            if iface.is_null() {
+                return Err(anyhow!("Failed to get VP9 encoder interface"));
+            }
+
+            // Initialize configuration with defaults
+            let mut cfg: vpx_sys::vpx_codec_enc_cfg_t = std::mem::zeroed();
+            
+            // Call vpx_codec_enc_config_default to get sane defaults
+            let err = vpx_sys::vpx_codec_enc_config_default(iface, &mut cfg, 0);
+            if err != vpx_sys::VPX_CODEC_OK {
+                return Err(anyhow!("Failed to get default encoder config: {}", err));
+            }
+
+            // Override with our new settings
+            cfg.g_w = width;
+            cfg.g_h = height;
+            cfg.g_timebase.num = 1;
+            cfg.g_timebase.den = 1_000_000;
+            cfg.g_lag_in_frames = 0;
+            cfg.kf_min_dist = 0; // Must be 0 in auto mode
+
+            // Manually ensure all rational fields have valid denominators
+            // This is a workaround for libvpx 1.16.0 validation issues
+            // We need to set ALL rational field denominators to 1, not just the ones we know about
+            unsafe {
+                let cfg_ptr = &mut cfg as *mut vpx_sys::vpx_codec_enc_cfg_t as *mut u8;
+                let struct_size = std::mem::size_of::<vpx_sys::vpx_codec_enc_cfg_t>();
+                
+                // Set all rational field denominators to 1
+                // A rational field is 8 bytes: 4 bytes num + 4 bytes den
+                // We iterate through the entire struct and fix any rational field with den=0
+                let mut offset = 0;
+                while offset + 8 <= struct_size {
+                    let num_ptr = (cfg_ptr.add(offset)) as *mut i32;
+                    let den_ptr = (cfg_ptr.add(offset + 4)) as *mut i32;
+                    
+                    // Check if this looks like a rational field (den is 0)
+                    let den_val = std::ptr::read(den_ptr);
+                    
+                    if den_val == 0 {
+                        // This might be a rational field with uninitialized den, set it to 1
+                        std::ptr::write(den_ptr, 1);
+                        // Set num to a reasonable default (1 for most rational fields)
+                        let num_val = std::ptr::read(num_ptr);
+                        if num_val == 0 {
+                            std::ptr::write(num_ptr, 1);
+                        }
+                    }
+                    
+                    offset += 4; // Move to next 4-byte boundary
+                }
+            }
+            
+            // Reset kf_min_dist after workaround (it may have been modified)
+            cfg.kf_min_dist = 0;
+
+            // Initialize encoder context
+            let mut ctx: vpx_sys::vpx_codec_ctx_t = std::mem::zeroed();
+            let flags = 0;
+            
+            let err = vpx_sys::vpx_codec_enc_init_ver(
+                &mut ctx,
+                iface,
+                &cfg,
+                flags,
+                VPX_ENCODER_ABI_VERSION,
+            );
+            if err != vpx_sys::VPX_CODEC_OK {
+                // Get error strings before destroying context
+                let err_str = vpx_sys::vpx_codec_error(&mut ctx);
+                let err_detail = vpx_sys::vpx_codec_error_detail(&mut ctx);
+                vpx_sys::vpx_codec_destroy(&mut ctx);
+                
+                let err_msg = if err_str.is_null() {
+                    format!("error code {}", err)
+                } else {
+                    format!("{}", std::ffi::CStr::from_ptr(err_str).to_string_lossy())
+                };
+                let detail_msg = if err_detail.is_null() {
+                    "".to_string()
+                } else {
+                    format!(": {}", std::ffi::CStr::from_ptr(err_detail).to_string_lossy())
+                };
+                return Err(anyhow!("Failed to reinitialize VP9 encoder: {}{}", err_msg, detail_msg));
+            }
+
+            // After initialization, use vpx_codec_control to set additional parameters
+            // This avoids the validation issues with the config struct
+
+            // Set CPU used for real-time (higher = faster, lower quality)
+            // 1 = good quality, 5 = real-time, 10 = fastest
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP8E_SET_CPUUSED as i32,
+                5i32,
+            );
+
+            // Enable auto alt-ref for better quality
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP8E_SET_ENABLEAUTOALTREF as i32,
+                1i32,
+            );
+
+            // Set tune content for screen content (better for RDP)
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP9E_SET_TUNE_CONTENT as i32,
+                vpx_sys::VP9E_CONTENT_SCREEN as i32,
+            );
+
+            // Set noise sensitivity to 0 (no noise for screen content)
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP9E_SET_NOISE_SENSITIVITY as i32,
+                0i32,
+            );
+
+            // Replace context
+            self.ctx = ctx;
+
+            // Update dimensions
+            self.width = width;
+            self.height = height;
+
+            // Re-allocate I420 buffer for new resolution
+            let width_usize = width as usize;
+            let height_usize = height as usize;
+            let y_size = width_usize * height_usize;
+            let uv_size = (width_usize / 2) * (height_usize / 2);
+            self.i420_buffer = vec![0u8; y_size + uv_size * 2];
+
+            // Reset frame count
+            self.frame_count = 0;
+        }
+
+        tracing::info!(
+            "VP9 encoder resolution changed to {}x{}",
+            width,
+            height
+        );
+
+        Ok(())
     }
 }
 

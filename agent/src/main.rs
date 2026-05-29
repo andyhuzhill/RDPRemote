@@ -178,7 +178,7 @@ async fn run_agent(args: Args) -> Result<()> {
         if let Some(new_tier) = adaptive.check_and_adjust() {
             tracing::info!("Bandwidth tier changed: {:?}", new_tier);
             // 动态调整编码器参数
-            // let _ = encoder.set_bitrate(new_tier.bitrate_kbps());
+            let _ = encoder.set_resolution(new_tier.width(), new_tier.height());
         }
 
         frame_count += 1;

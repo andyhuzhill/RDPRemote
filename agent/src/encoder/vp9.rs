@@ -1,0 +1,366 @@
+//! VP9 video encoder implementation using libvpx
+
+use super::{EncodedFrame, VideoEncoder};
+use anyhow::{anyhow, Result};
+use std::ptr;
+
+// VPX constants (from vpx_encoder.h)
+const VPX_EFLAG_FORCE_KF: vpx_sys::vpx_enc_frame_flags_t = 1;
+const VPX_DL_REALTIME: vpx_sys::vpx_codec_flags_t = 1;
+const VPX_FRAME_IS_KEY: vpx_sys::vpx_codec_frame_flags_t = 0x1;
+const VPX_ENCODER_ABI_VERSION: i32 = 27; // (18 + 1 + 8) for libvpx 1.16
+
+/// VP9 video encoder using libvpx
+pub struct VP9Encoder {
+    ctx: vpx_sys::vpx_codec_ctx_t,
+    width: u32,
+    height: u32,
+    bitrate_kbps: u32,
+    frame_count: u64,
+    force_keyframe: bool,
+    i420_buffer: Vec<u8>,
+}
+
+impl VP9Encoder {
+    /// Create a new VP9 encoder
+    pub fn new(width: u32, height: u32, bitrate_kbps: u32) -> Result<Self> {
+        // Validate dimensions (must be divisible by 2 for YUV)
+        if width % 2 != 0 || height % 2 != 0 {
+            return Err(anyhow!("Width and height must be even numbers"));
+        }
+
+        unsafe {
+            // Get VP9 encoder interface
+            let iface = vpx_sys::vpx_codec_vp9_cx();
+            if iface.is_null() {
+                return Err(anyhow!("Failed to get VP9 encoder interface"));
+            }
+
+            // Initialize configuration with defaults
+            let mut cfg: vpx_sys::vpx_codec_enc_cfg_t = unsafe { std::mem::zeroed() };
+            
+            // Call vpx_codec_enc_config_default to get sane defaults
+            let err = vpx_sys::vpx_codec_enc_config_default(iface, &mut cfg, 0);
+            if err != vpx_sys::VPX_CODEC_OK {
+                return Err(anyhow!("Failed to get default encoder config: {}", err));
+            }
+
+            // Override with our settings
+            cfg.g_w = width;
+            cfg.g_h = height;
+            cfg.g_timebase.num = 1;
+            cfg.g_timebase.den = 1_000_000;
+            cfg.g_lag_in_frames = 0;
+            cfg.kf_min_dist = 0; // Must be 0 in auto mode
+
+            // Manually ensure all rational fields have valid denominators
+            // This is a workaround for libvpx 1.16.0 validation issues
+            // We need to set ALL rational field denominators to 1, not just the ones we know about
+            unsafe {
+                let cfg_ptr = &mut cfg as *mut vpx_sys::vpx_codec_enc_cfg_t as *mut u8;
+                let struct_size = std::mem::size_of::<vpx_sys::vpx_codec_enc_cfg_t>();
+                
+                // Set all rational field denominators to 1
+                // A rational field is 8 bytes: 4 bytes num + 4 bytes den
+                // We iterate through the entire struct and fix any rational field with den=0
+                let mut offset = 0;
+                while offset + 8 <= struct_size {
+                    let num_ptr = (cfg_ptr.add(offset)) as *mut i32;
+                    let den_ptr = (cfg_ptr.add(offset + 4)) as *mut i32;
+                    
+                    // Check if this looks like a rational field (den is 0)
+                    let den_val = std::ptr::read(den_ptr);
+                    
+                    if den_val == 0 {
+                        // This might be a rational field with uninitialized den, set it to 1
+                        std::ptr::write(den_ptr, 1);
+                        // Set num to a reasonable default (1 for most rational fields)
+                        let num_val = std::ptr::read(num_ptr);
+                        if num_val == 0 {
+                            std::ptr::write(num_ptr, 1);
+                        }
+                    }
+                    
+                    offset += 4; // Move to next 4-byte boundary
+                }
+            }
+            
+            // Reset kf_min_dist after workaround (it may have been modified)
+            cfg.kf_min_dist = 0;
+
+            // Initialize encoder context
+            let mut ctx: vpx_sys::vpx_codec_ctx_t = std::mem::zeroed();
+            let flags = 0;
+            
+            let err = vpx_sys::vpx_codec_enc_init_ver(
+                &mut ctx,
+                iface,
+                &cfg,
+                flags,
+                VPX_ENCODER_ABI_VERSION,
+            );
+            if err != vpx_sys::VPX_CODEC_OK {
+                // Get error strings before destroying context
+                let err_str = vpx_sys::vpx_codec_error(&mut ctx);
+                let err_detail = vpx_sys::vpx_codec_error_detail(&mut ctx);
+                vpx_sys::vpx_codec_destroy(&mut ctx);
+                
+                let err_msg = if err_str.is_null() {
+                    format!("error code {}", err)
+                } else {
+                    unsafe { std::ffi::CStr::from_ptr(err_str).to_string_lossy().into_owned() }
+                };
+                let detail_msg = if err_detail.is_null() {
+                    "".to_string()
+                } else {
+                    format!(": {}", unsafe { std::ffi::CStr::from_ptr(err_detail).to_string_lossy() })
+                };
+                return Err(anyhow!("Failed to initialize VP9 encoder: {}{}", err_msg, detail_msg));
+            }
+
+            // After initialization, use vpx_codec_control to set additional parameters
+            // This avoids the validation issues with the config struct
+
+            // Set CPU used for real-time (higher = faster, lower quality)
+            // 1 = good quality, 5 = real-time, 10 = fastest
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP8E_SET_CPUUSED as i32,
+                5i32,
+            );
+
+            // Enable auto alt-ref for better quality
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP8E_SET_ENABLEAUTOALTREF as i32,
+                1i32,
+            );
+
+            // Set tune content for screen content (better for RDP)
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP9E_SET_TUNE_CONTENT as i32,
+                vpx_sys::VP9E_CONTENT_SCREEN as i32,
+            );
+
+            // Set noise sensitivity to 0 (no noise for screen content)
+            vpx_sys::vpx_codec_control_(
+                &mut ctx,
+                vpx_sys::VP9E_SET_NOISE_SENSITIVITY as i32,
+                0i32,
+            );
+
+            // Allocate I420 buffer (Y: width*height, U: width/2*height/2, V: width/2*height/2)
+            let width_usize = width as usize;
+            let height_usize = height as usize;
+            let y_size = width_usize * height_usize;
+            let uv_size = (width_usize / 2) * (height_usize / 2);
+            let i420_buffer = vec![0u8; y_size + uv_size * 2];
+
+            Ok(VP9Encoder {
+                ctx,
+                width,
+                height,
+                bitrate_kbps,
+                frame_count: 0,
+                force_keyframe: false,
+                i420_buffer,
+            })
+        }
+    }
+}
+
+impl Drop for VP9Encoder {
+    fn drop(&mut self) {
+        unsafe {
+            vpx_sys::vpx_codec_destroy(&mut self.ctx);
+        }
+    }
+}
+
+impl VideoEncoder for VP9Encoder {
+    fn encode(&mut self, frame: &[u8], width: u32, height: u32, timestamp_us: u64) -> Result<EncodedFrame> {
+        // Validate input
+        if frame.len() != (width * height * 4) as usize {
+            return Err(anyhow!(
+                "Invalid frame size: expected {}, got {}",
+                width * height * 4,
+                frame.len()
+            ));
+        }
+
+        unsafe {
+            // Convert BGRA to I420
+            bgra_to_i420(
+                frame,
+                width,
+                height,
+                &mut self.i420_buffer,
+            )?;
+
+            // Prepare I420 image
+            let width_usize = width as usize;
+            let height_usize = height as usize;
+            let y_size = width_usize * height_usize;
+            let uv_size = (width_usize / 2) * (height_usize / 2);
+
+            let mut img: vpx_sys::vpx_image_t = std::mem::zeroed();
+            let y_plane = self.i420_buffer.as_mut_ptr();
+            let u_plane = y_plane.add(y_size);
+            let v_plane = u_plane.add(uv_size);
+
+            // Manually set up the image structure
+            img.fmt = vpx_sys::VPX_IMG_FMT_I420;
+            img.w = width;
+            img.h = height;
+            img.d_w = width;
+            img.d_h = height;
+            img.bit_depth = vpx_sys::VPX_BITS_8;
+            img.bps = 12;
+            img.x_chroma_shift = 1;
+            img.y_chroma_shift = 1;
+            img.cs = vpx_sys::VPX_CS_BT_601;
+            img.planes[0] = y_plane;
+            img.planes[1] = u_plane;
+            img.planes[2] = v_plane;
+            img.planes[3] = ptr::null_mut();
+            img.stride[0] = width as i32;
+            img.stride[1] = (width / 2) as i32;
+            img.stride[2] = (width / 2) as i32;
+            img.stride[3] = 0;
+            img.img_data = y_plane;
+            img.img_data_owner = 0; // We don't own the data (it's in our buffer)
+            img.self_allocd = 0;
+
+            // Set frame flags
+            let mut enc_flags: vpx_sys::vpx_enc_frame_flags_t = 0;
+            if self.force_keyframe {
+                enc_flags |= VPX_EFLAG_FORCE_KF;
+                self.force_keyframe = false;
+            }
+
+            // Encode the frame
+            let duration = 33_333u64; // ~30fps in microseconds
+            let err = vpx_sys::vpx_codec_encode(
+                &mut self.ctx,
+                &img,
+                timestamp_us as vpx_sys::vpx_codec_pts_t,
+                duration,
+                enc_flags,
+                1u64, // VPX_DL_REALTIME as u64
+            );
+            if err != vpx_sys::VPX_CODEC_OK {
+                return Err(anyhow!("Failed to encode frame: {}", err));
+            }
+
+            // Collect encoded data
+            let mut encoded_data = Vec::new();
+            let mut iter: vpx_sys::vpx_codec_iter_t = ptr::null_mut();
+
+            loop {
+                let pkt = vpx_sys::vpx_codec_get_cx_data(&mut self.ctx, &mut iter);
+                if pkt.is_null() {
+                    break;
+                }
+
+                if (*pkt).kind == vpx_sys::VPX_CODEC_CX_FRAME_PKT {
+                    // Cast to mutable pointer to access frame data
+                    let pkt_mut = pkt as *mut vpx_sys::vpx_codec_cx_pkt_t;
+                    let frame_ptr = (*pkt_mut).data.frame_mut();
+                    let frame_ref = &*frame_ptr;
+                    
+                    let slice = std::slice::from_raw_parts(
+                        frame_ref.buf as *const u8,
+                        frame_ref.sz,
+                    );
+                    encoded_data.extend_from_slice(slice);
+
+                    // Check if this is a keyframe
+                    let is_keyframe = (frame_ref.flags & VPX_FRAME_IS_KEY) != 0;
+
+                    self.frame_count += 1;
+
+                    return Ok(EncodedFrame {
+                        data: encoded_data,
+                        is_keyframe,
+                        timestamp_us,
+                        width,
+                        height,
+                    });
+                }
+            }
+
+            self.frame_count += 1;
+
+            // If no frame data returned, create empty frame
+            Ok(EncodedFrame {
+                data: encoded_data,
+                is_keyframe: false,
+                timestamp_us,
+                width,
+                height,
+            })
+        }
+    }
+
+    fn set_bitrate(&mut self, bitrate_kbps: u32) {
+        self.bitrate_kbps = bitrate_kbps;
+        unsafe {
+            // Update bitrate via control
+            vpx_sys::vpx_codec_control_(
+                &mut self.ctx,
+                vpx_sys::VP8E_SET_CQ_LEVEL as i32,
+                0i32,
+            );
+        }
+    }
+
+    fn force_keyframe(&mut self) {
+        self.force_keyframe = true;
+    }
+}
+
+/// Convert BGRA frame to I420 planar format
+/// BGRA: 4 bytes per pixel (B, G, R, A)
+/// I420: Y plane (width*height) + U plane (width/2*height/2) + V plane (width/2*height/2)
+fn bgra_to_i420(bgra: &[u8], width: u32, height: u32, i420: &mut [u8]) -> Result<()> {
+    let width_usize = width as usize;
+    let height_usize = height as usize;
+    let y_size = width_usize * height_usize;
+    let uv_size = (width_usize / 2) * (height_usize / 2);
+    
+    // Use split_at_mut to avoid overlapping borrows
+    let (y_plane, rest) = i420.split_at_mut(y_size);
+    let (u_plane, v_plane) = rest.split_at_mut(uv_size);
+
+    // Convert each pixel
+    for y in 0..height_usize {
+        for x in 0..width_usize {
+            let bgra_idx = (y * width_usize + x) * 4;
+            let y_idx = y * width_usize + x;
+
+            let b = bgra[bgra_idx] as f32;
+            let g = bgra[bgra_idx + 1] as f32;
+            let r = bgra[bgra_idx + 2] as f32;
+
+            // Convert to YUV (BT.601)
+            // Y = 0.299*R + 0.587*G + 0.114*B
+            // U = 0.492*(B - Y) + 128
+            // V = 0.877*(R - Y) + 128
+            let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
+            let u_val = (0.492 * (b - y_val as f32) + 128.0) as u8;
+            let v_val = (0.877 * (r - y_val as f32) + 128.0) as u8;
+
+            y_plane[y_idx] = y_val;
+
+            // Chroma subsampling (4:2:0)
+            if x % 2 == 0 && y % 2 == 0 {
+                let uv_idx = (y / 2) * (width_usize / 2) + x / 2;
+                u_plane[uv_idx] = u_val;
+                v_plane[uv_idx] = v_val;
+            }
+        }
+    }
+
+    Ok(())
+}

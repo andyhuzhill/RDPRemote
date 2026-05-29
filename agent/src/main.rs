@@ -1,9 +1,9 @@
 //! RDP Agent - 远程桌面控制代理
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
-use futures_util::{sink::SinkExt, stream::StreamExt};
 use rdp_common::signaling::SignalingMessage;
+use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 #[cfg(target_os = "windows")]
@@ -58,10 +58,15 @@ async fn run_agent(args: Args) -> Result<()> {
     let mut encoder = VP9Encoder::new(width, height, args.bitrate)
         .context("Failed to create VP9 encoder")?;
 
+    // 创建消息通道，用于从 ICE 回调转发消息到主循环
+    let (msg_tx, mut msg_rx) = mpsc::channel::<SignalingMessage>(100);
+
     // 连接信令服务器
     let (ws_stream, _) = connect_async(&args.server).await
         .context("Failed to connect to signaling server")?;
-    let (mut ws_tx, mut ws_rx) = ws_stream.split();
+    let (ws_tx, ws_rx) = ws_stream.split();
+    let mut ws_tx = ws_tx;
+    let mut ws_rx = ws_rx;
 
     // 注册设备
     let reg = serde_json::to_string(&SignalingMessage::Register {
@@ -78,38 +83,66 @@ async fn run_agent(args: Args) -> Result<()> {
         ws_tx.send(Message::Text(conn.into())).await?;
     }
 
-    // 等待 Connect 或 Offer
+    // 创建 WebRTC peer
     let peer = AgentPeer::new().await.context("Failed to create WebRTC peer")?;
 
-    // 信令循环
+    // 注册 ICE 候选收集回调，自动转发给对端
+    let ice_tx = msg_tx.clone();
+    peer.on_ice_candidate(move |candidate| {
+        let tx = ice_tx.clone();
+        Box::pin(async move {
+            if let Ok(ice_init) = candidate.to_json() {
+                let ice_msg = SignalingMessage::IceCandidate {
+                    candidate: ice_init.candidate,
+                    sdp_mid: ice_init.sdp_mid.unwrap_or_default(),
+                    sdp_m_line_index: ice_init.sdp_mline_index.unwrap_or(0),
+                };
+                if let Err(e) = tx.send(ice_msg).await {
+                    tracing::warn!("Failed to send ICE candidate: {}", e);
+                }
+            }
+        })
+    });
+
+    // 等待 Connect 或 Offer
     tracing::info!("Waiting for signaling messages...");
     let mut connected = false;
 
     while !connected {
-        match ws_rx.next().await {
-            Some(Ok(Message::Text(text))) => {
-                match serde_json::from_str::<SignalingMessage>(&text) {
-                    Ok(SignalingMessage::Connect { target_device_id }) => {
-                        tracing::info!("Connect from: {}", target_device_id);
-                        // 创建并发送 Offer
-                        let offer = peer.create_offer().await?;
-                        let msg = serde_json::to_string(&SignalingMessage::Offer { sdp: offer })?;
-                        ws_tx.send(Message::Text(msg.into())).await?;
+        tokio::select! {
+            // 处理来自 WebSocket 的信令消息
+            msg = ws_rx.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<SignalingMessage>(&text) {
+                            Ok(SignalingMessage::Connect { target_device_id }) => {
+                                tracing::info!("Connect from: {}", target_device_id);
+                                // 创建并发送 Offer
+                                let offer = peer.create_offer().await?;
+                                let msg = serde_json::to_string(&SignalingMessage::Offer { sdp: offer })?;
+                                ws_tx.send(Message::Text(msg.into())).await?;
+                            }
+                            Ok(SignalingMessage::Answer { sdp }) => {
+                                tracing::info!("Received answer");
+                                peer.set_answer(sdp).await?;
+                                connected = true;
+                            }
+                            Ok(SignalingMessage::IceCandidate { candidate, sdp_mid, sdp_m_line_index }) => {
+                                peer.add_ice_candidate(candidate, sdp_mid, sdp_m_line_index).await?;
+                            }
+                            _ => {}
+                        }
                     }
-                    Ok(SignalingMessage::Answer { sdp }) => {
-                        tracing::info!("Received answer");
-                        peer.set_answer(sdp).await?;
-                        connected = true;
-                    }
-                    Ok(SignalingMessage::IceCandidate { candidate, sdp_mid, sdp_m_line_index }) => {
-                        peer.add_ice_candidate(candidate, sdp_mid, sdp_m_line_index).await?;
-                    }
+                    Some(Err(e)) => return Err(anyhow::anyhow!("WebSocket error: {}", e)),
+                    None => return Err(anyhow::anyhow!("WebSocket closed")),
                     _ => {}
                 }
             }
-            Some(Err(e)) => return Err(anyhow::anyhow!("WebSocket error: {}", e)),
-            None => return Err(anyhow::anyhow!("WebSocket closed")),
-            _ => {}
+            // 处理从 ICE 回调发来的消息
+            Some(ice_msg) = msg_rx.recv() => {
+                let msg = serde_json::to_string(&ice_msg)?;
+                ws_tx.send(Message::Text(msg.into())).await?;
+            }
         }
     }
 

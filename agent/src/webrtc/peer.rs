@@ -15,6 +15,7 @@ use webrtc::{
     interceptor::registry::Registry,
     media::Sample,
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
+    ice_transport::ice_candidate::RTCIceCandidate,
 };
 
 use crate::webrtc::{Error, Result};
@@ -167,6 +168,30 @@ impl AgentPeer {
             .map_err(|e| Error::Ice(format!("Failed to add ICE candidate: {}", e)))?;
 
         Ok(())
+    }
+
+    /// Register a callback to receive ICE candidates generated locally
+    ///
+    /// This method sets up a handler that will be called whenever a new
+    /// ICE candidate is gathered. The callback should forward the candidate
+    /// to the remote peer via signaling.
+    ///
+    /// # Arguments
+    /// * `callback` - A boxed async closure that receives the ICE candidate
+    pub fn on_ice_candidate<F>(&self, callback: F)
+    where
+        F: Fn(RTCIceCandidate) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync + Clone + 'static,
+    {
+        let peer_connection = Arc::clone(&self.peer_connection);
+
+        peer_connection.on_ice_candidate(Box::new(move |candidate: Option<RTCIceCandidate>| {
+            let callback = callback.clone();
+            Box::pin(async move {
+                if let Some(candidate) = candidate {
+                    callback(candidate).await;
+                }
+            })
+        }));
     }
 
     /// Get the current connection state

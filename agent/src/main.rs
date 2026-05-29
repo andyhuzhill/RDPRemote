@@ -7,6 +7,8 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 #[cfg(target_os = "windows")]
+use rdp_agent::adaptive::{AdaptiveController, BandwidthTier};
+#[cfg(target_os = "windows")]
 use rdp_agent::encoder::VP9Encoder;
 #[cfg(target_os = "windows")]
 use rdp_agent::screen::{D3D11ScreenCapture, ScreenCapture};
@@ -148,22 +150,35 @@ async fn run_agent(args: Args) -> Result<()> {
 
     // 视频流循环
     tracing::info!("WebRTC connected, starting video stream...");
+    let mut adaptive = AdaptiveController::new();
     let mut frame_count = 0u64;
-    let frame_interval = std::time::Duration::from_millis(33);
+    let mut frame_interval = std::time::Duration::from_millis(33);
 
     loop {
         let start = std::time::Instant::now();
+
+        // 获取当前带宽层级并调整帧间隔
+        let tier = adaptive.current_tier();
+        frame_interval = tier.frame_interval();
 
         match capture.capture_frame() {
             Ok(frame) => {
                 match encoder.encode(&frame.data, frame.width, frame.height, frame.timestamp_us) {
                     Ok(encoded) => {
                         let _ = peer.send_video_frame(encoded.data, 33_333, encoded.is_keyframe).await;
+                        adaptive.add_bytes_sent(encoded.data.len() as u64);
                     }
                     Err(e) => tracing::warn!("Encode error: {}", e),
                 }
             }
             Err(e) => tracing::trace!("Capture error: {}", e),
+        }
+
+        // 检查并调整带宽层级
+        if let Some(new_tier) = adaptive.check_and_adjust() {
+            tracing::info!("Bandwidth tier changed: {:?}", new_tier);
+            // 动态调整编码器参数
+            // let _ = encoder.set_bitrate(new_tier.bitrate_kbps());
         }
 
         frame_count += 1;

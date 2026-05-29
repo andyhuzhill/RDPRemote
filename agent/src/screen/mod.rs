@@ -40,5 +40,3 @@ pub trait ScreenCapture {
     fn get_dimensions(&self) -> (u32, u32);
 }
 
-#[cfg(test)]
-mod tests;

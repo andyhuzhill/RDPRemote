@@ -1,0 +1,310 @@
+/* RDPRemote - 被控端 UI 样式 */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-card: #21262d;
+    --border-color: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --accent-color: #58a6ff;
+    --accent-hover: #79c0ff;
+    --success-color: #3fb950;
+    --warning-color: #d29922;
+    --danger-color: #f85149;
+    --code-bg: #0d1117;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+/* Header */
+header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+header h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+/* Cards */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.card h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.card h2::before {
+    content: '';
+    width: 4px;
+    height: 1.2em;
+    background: var(--accent-color);
+    border-radius: 2px;
+}
+
+/* Device Info */
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.value {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 1rem;
+}
+
+.value.status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+}
+
+.status.waiting {
+    background: var(--warning-color);
+    color: #000;
+}
+
+.status.connected {
+    background: var(--success-color);
+    color: #000;
+}
+
+.status.disconnected {
+    background: var(--danger-color);
+    color: #fff;
+}
+
+/* Password Display */
+.password-display {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.password-display code {
+    flex: 1;
+    background: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    font-size: 1.5rem;
+    letter-spacing: 0.25em;
+    text-align: center;
+}
+
+.hint {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-style: italic;
+}
+
+/* Buttons */
+.btn-group {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.btn-primary {
+    background: var(--accent-color);
+    color: #000;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background: var(--border-color);
+}
+
+.btn-small {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+/* Logs */
+#log-container {
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.875rem;
+}
+
+.log-entry {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry.info {
+    color: var(--accent-color);
+}
+
+.log-entry.success {
+    color: var(--success-color);
+}
+
+.log-entry.warning {
+    color: var(--warning-color);
+}
+
+.log-entry.error {
+    color: var(--danger-color);
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+footer p {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .container {
+        padding: 1rem;
+    }
+
+    header h1 {
+        font-size: 1.5rem;
+    }
+
+    .card {
+        padding: 1rem;
+    }
+
+    .password-display {
+        flex-direction: column;
+    }
+
+    .password-display code {
+        width: 100%;
+    }
+
+    .btn-group {
+        flex-direction: column;
+    }
+
+    .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* Animations */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.value.status.waiting {
+    animation: pulse 2s infinite;
+}
+
+/* Scrollbar */
+#log-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+#log-container::-webkit-scrollbar-track {
+    background: var(--code-bg);
+    border-radius: 4px;
+}
+
+#log-container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+#log-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}

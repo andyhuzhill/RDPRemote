@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RDPRemote - 被控端</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖥️ RDPRemote 被控端</h1>
+            <p class="subtitle">远程桌面控制系统</p>
+        </header>
+
+        <main>
+            <div class="card device-info">
+                <h2>设备信息</h2>
+                <div class="info-row">
+                    <span class="label">设备代码:</span>
+                    <span class="value" id="device-code">正在生成...</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">平台:</span>
+                    <span class="value" id="platform-info">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">状态:</span>
+                    <span class="value status" id="status">等待连接</span>
+                </div>
+            </div>
+
+            <div class="card connection-info">
+                <h2>连接密码</h2>
+                <div class="password-display">
+                    <code id="connection-password">-</code>
+                    <button id="copy-password" class="btn btn-small">复制</button>
+                </div>
+                <p class="hint">将此密码提供给控制端以建立连接</p>
+            </div>
+
+            <div class="card actions">
+                <h2>操作</h2>
+                <div class="btn-group">
+                    <button id="btn-regenerate" class="btn btn-primary">重新生成密码</button>
+                    <button id="btn-refresh" class="btn btn-secondary">刷新设备信息</button>
+                </div>
+            </div>
+
+            <div class="card logs">
+                <h2>连接日志</h2>
+                <div id="log-container">
+                    <p class="log-entry">等待连接...</p>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>RDPRemote v1.0 | WebRTC + VP9 远程桌面</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

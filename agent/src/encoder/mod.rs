@@ -1,10 +1,13 @@
 //! Video encoder module
 
+#[cfg(feature = "vpx")]
 pub mod vp9;
 
+#[cfg(feature = "vpx")]
 #[cfg(test)]
 mod vp9_test;
 
+#[cfg(feature = "vpx")]
 pub use vp9::VP9Encoder;
 
 /// Encoded video frame

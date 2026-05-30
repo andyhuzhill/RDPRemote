@@ -14,11 +14,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install Rust 1.79
-      uses: dtolnay/rust-toolchain@1.79
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
       
-    - name: Build Agent
-      run: cargo build --release -p rdp-agent
+    - name: Build Agent (without libvpx)
+      run: cargo build --release -p rdp-agent --no-default-features
       
     - name: Upload Artifact
       uses: actions/upload-artifact@v4

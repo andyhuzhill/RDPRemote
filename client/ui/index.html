@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RDPRemote - 远程桌面连接</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>RDPRemote</h1>
+        <p class="subtitle">远程桌面控制系统</p>
+        
+        <form id="connect-form">
+            <div class="form-group">
+                <label for="device-code">设备代码</label>
+                <input type="text" id="device-code" name="device-code" placeholder="请输入设备代码" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" name="password" placeholder="请输入密码" required>
+            </div>
+            
+            <button type="submit" id="connect-btn">连接</button>
+        </form>
+        
+        <div id="status" class="status"></div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

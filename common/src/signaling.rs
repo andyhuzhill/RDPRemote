@@ -17,6 +17,11 @@ pub enum SignalingMessage {
     Error { message: String },
     #[serde(rename = "input")]
     Input { event: InputEvent },
+    // Authentication messages
+    #[serde(rename = "auth")]
+    Auth { token: String },
+    #[serde(rename = "auth-response")]
+    AuthResponse { success: bool, message: Option<String> },
     // File transfer messages
     #[serde(rename = "file-transfer-request")]
     FileTransferRequest {

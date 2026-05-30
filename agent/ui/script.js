@@ -6,6 +6,92 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => document.querySelectorAll(selector);
 
+// 默认设置
+const DEFAULT_SETTINGS = {
+    autoReconnect: true,
+    maxReconnectAttempts: 5,
+    reconnectDelay: 3,
+    videoQuality: 'medium',
+    frameRate: 30,
+    adaptiveBitrate: true,
+    passwordExpiry: 30,
+    requireConfirmation: false,
+    logLevel: 'info'
+};
+
+// 当前设置（从 localStorage 加载或使用默认值）
+let currentSettings = { ...DEFAULT_SETTINGS };
+
+// 加载设置
+function loadSettings() {
+    try {
+        const saved = localStorage.getItem('rdp-remote-settings');
+        if (saved) {
+            currentSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        }
+    } catch (e) {
+        console.warn('加载设置失败，使用默认值');
+    }
+}
+
+// 保存设置
+function saveSettings() {
+    try {
+        localStorage.setItem('rdp-remote-settings', JSON.stringify(currentSettings));
+    } catch (e) {
+        console.warn('保存设置失败');
+    }
+}
+
+// 重置设置为默认
+function resetSettings() {
+    currentSettings = { ...DEFAULT_SETTINGS };
+    applySettingsToUI();
+    addLog('设置已重置为默认值', 'info');
+}
+
+// 将设置应用到 UI
+function applySettingsToUI() {
+    $('#setting-auto-reconnect').checked = currentSettings.autoReconnect;
+    $('#setting-max-reconnect-attempts').value = currentSettings.maxReconnectAttempts;
+    $('#setting-reconnect-delay').value = currentSettings.reconnectDelay;
+    $('#setting-video-quality').value = currentSettings.videoQuality;
+    $('#setting-frame-rate').value = currentSettings.frameRate;
+    $('#setting-adaptive-bitrate').checked = currentSettings.adaptiveBitrate;
+    $('#setting-password-expiry').value = currentSettings.passwordExpiry;
+    $('#setting-require-confirmation').checked = currentSettings.requireConfirmation;
+    $('#setting-log-level').value = currentSettings.logLevel;
+}
+
+// 从 UI 获取设置
+function getSettingsFromUI() {
+    return {
+        autoReconnect: $('#setting-auto-reconnect').checked,
+        maxReconnectAttempts: parseInt($('#setting-max-reconnect-attempts').value) || 5,
+        reconnectDelay: parseInt($('#setting-reconnect-delay').value) || 3,
+        videoQuality: $('#setting-video-quality').value,
+        frameRate: parseInt($('#setting-frame-rate').value) || 30,
+        adaptiveBitrate: $('#setting-adaptive-bitrate').checked,
+        passwordExpiry: parseInt($('#setting-password-expiry').value) || 30,
+        requireConfirmation: $('#setting-require-confirmation').checked,
+        logLevel: $('#setting-log-level').value
+    };
+}
+
+// 打开设置面板
+function openSettingsPanel() {
+    $('#settings-panel').classList.remove('hidden');
+    $('#settings-overlay').classList.remove('hidden');
+    applySettingsToUI();
+    addLog('设置面板已打开', 'info');
+}
+
+// 关闭设置面板
+function closeSettingsPanel() {
+    $('#settings-panel').classList.add('hidden');
+    $('#settings-overlay').classList.add('hidden');
+}
+
 // 生成随机设备代码
 function generateDeviceCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -76,6 +162,9 @@ function updateStatus(status) {
 
 // 初始化
 function init() {
+    // 加载保存的设置
+    loadSettings();
+    
     // 生成设备代码
     const deviceCode = generateDeviceCode();
     $('#device-code').textContent = deviceCode;
@@ -125,6 +214,42 @@ function init() {
         addLog('设备信息已刷新', 'info');
     });
     
+    // 设置按钮
+    $('#btn-settings').addEventListener('click', openSettingsPanel);
+    
+    // 关闭设置面板按钮
+    $('#btn-close-settings').addEventListener('click', closeSettingsPanel);
+    
+    // 遮罩层点击关闭
+    $('#settings-overlay').addEventListener('click', closeSettingsPanel);
+    
+    // 重置设置按钮
+    $('#btn-reset-settings').addEventListener('click', () => {
+        if (confirm('确定要重置所有设置为默认值吗？')) {
+            resetSettings();
+        }
+    });
+    
+    // 保存设置按钮
+    $('#btn-save-settings').addEventListener('click', () => {
+        currentSettings = getSettingsFromUI();
+        saveSettings();
+        addLog('设置已保存', 'success');
+        
+        // 根据日志级别过滤日志显示
+        applyLogLevel(currentSettings.logLevel);
+        
+        // 关闭设置面板
+        closeSettingsPanel();
+    });
+    
+    // ESC 键关闭设置面板
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !$('#settings-panel').classList.contains('hidden')) {
+            closeSettingsPanel();
+        }
+    });
+    
     // 模拟连接状态变化（实际使用时由后端 WebSocket 控制）
     window.updateConnectionStatus = (status) => {
         updateStatus(status);
@@ -143,3 +268,39 @@ function init() {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', init);
+
+// 应用日志级别过滤
+function applyLogLevel(level) {
+    const logLevels = { debug: 0, info: 1, warning: 2, error: 3 };
+    const currentLevel = logLevels[level] ?? 1;
+    
+    const entries = $$('#log-container .log-entry');
+    entries.forEach(entry => {
+        const entryType = entry.classList.contains('debug') ? 'debug' :
+                          entry.classList.contains('info') ? 'info' :
+                          entry.classList.contains('warning') ? 'warning' :
+                          entry.classList.contains('error') ? 'error' : 'info';
+        
+        const entryLevel = logLevels[entryType] ?? 1;
+        if (entryLevel < currentLevel) {
+            entry.style.display = 'none';
+        } else {
+            entry.style.display = '';
+        }
+    });
+}
+
+// 重写 addLog 以支持日志级别
+const originalAddLog = addLog;
+addLog = function(message, type = 'info') {
+    const logLevels = { debug: 0, info: 1, warning: 2, error: 3 };
+    const currentLevel = logLevels[currentSettings.logLevel] ?? 1;
+    const messageLevel = logLevels[type] ?? 1;
+    
+    // 如果当前日志级别低于设置级别，不显示
+    if (messageLevel < currentLevel) {
+        return;
+    }
+    
+    originalAddLog(message, type);
+};

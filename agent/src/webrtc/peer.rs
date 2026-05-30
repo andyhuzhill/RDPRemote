@@ -71,13 +71,39 @@ impl AgentPeer {
             .await
             .map_err(|e| Error::WebRtc(format!("Failed to create peer connection: {}", e)))?;
 
-        // Create video codec capability for VP8
+        // Create video codec capability for VP8 with RTCP feedback mechanisms
+        // RTCP feedback enables adaptive streaming and error recovery
         let codec = RTCRtpCodecCapability {
             mime_type: "video/VP8".to_string(),
             clock_rate: 90000,
             channels: 0,
             sdp_fmtp_line: "level-asymmetry-allowed=1;packetization-mode=1".to_string(),
-            rtcp_feedback: vec![],
+            rtcp_feedback: vec![
+                // goog-remb: Receiver Estimated Maximum Bitrate feedback
+                // Enables receiver to inform sender of available bandwidth
+                webrtc::rtp_transceiver::RTCPFeedback {
+                    typ: "goog-remb".to_string(),
+                    parameter: "".to_string(),
+                },
+                // ccm fir: Full Intra Request via RTCP Feedback
+                // Allows receiver to request a keyframe from sender
+                webrtc::rtp_transceiver::RTCPFeedback {
+                    typ: "ccm".to_string(),
+                    parameter: "fir".to_string(),
+                },
+                // nack: Negative Acknowledgement for packet loss recovery
+                // Enables sender to retransmit lost packets
+                webrtc::rtp_transceiver::RTCPFeedback {
+                    typ: "nack".to_string(),
+                    parameter: "".to_string(),
+                },
+                // nack pli: Picture Loss Indication
+                // Alternative keyframe request mechanism
+                webrtc::rtp_transceiver::RTCPFeedback {
+                    typ: "nack".to_string(),
+                    parameter: "pli".to_string(),
+                },
+            ],
         };
 
         // Create video track for sending

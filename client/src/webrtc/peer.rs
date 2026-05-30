@@ -125,6 +125,8 @@ impl ClientPeer {
     }
 
     /// Add a video transceiver for receiving video (call before create_answer)
+    /// RTCP feedback mechanisms are negotiated through SDP offer/answer exchange
+    /// The agent's offer includes RTCP feedback capabilities (goog-remb, nack, fir, pli)
     pub async fn add_video_transceiver(&self) -> Result<()> {
         let transceiver_init = RTCRtpTransceiverInit {
             direction: RTCRtpTransceiverDirection::Recvonly,

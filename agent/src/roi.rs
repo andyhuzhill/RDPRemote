@@ -21,6 +21,7 @@ pub struct RoiDetector {
     tiles_x: u32,
     tiles_y: u32,
     prev_hashes: Vec<u64>,
+    current_hashes: Vec<u64>,  // 复用 hash 缓冲区，避免每帧分配
 }
 
 impl RoiDetector {
@@ -33,12 +34,14 @@ impl RoiDetector {
     pub fn new(width: u32, height: u32, tile_size: u32) -> Self {
         let tiles_x = (width + tile_size - 1) / tile_size;
         let tiles_y = (height + tile_size - 1) / tile_size;
+        let num_tiles = (tiles_x * tiles_y) as usize;
         
         RoiDetector {
             tile_size,
             tiles_x,
             tiles_y,
-            prev_hashes: vec![0; (tiles_x * tiles_y) as usize],
+            prev_hashes: vec![0; num_tiles],
+            current_hashes: vec![0; num_tiles],  // 预分配复用缓冲区
         }
     }
     
@@ -71,6 +74,10 @@ impl RoiDetector {
             return Vec::new();
         }
         
+        // 复用 current_hashes，避免每帧分配
+        self.current_hashes.clear();
+        self.current_hashes.resize(self.tiles_x as usize * self.tiles_y as usize, 0);
+        
         // 收集所有变化的 tile
         let mut changed_tiles: Vec<(u32, u32)> = Vec::new();
         
@@ -85,7 +92,7 @@ impl RoiDetector {
                 let tile_width = tile_x_end - tile_x_start;
                 let tile_height = tile_y_end - tile_y_start;
                 
-                // 提取 tile 数据
+                // 提取 tile 数据 - 复用缓冲区
                 let mut tile_data: Vec<u8> = Vec::with_capacity((tile_width * tile_height * 4) as usize);
                 for row in 0..tile_height {
                     let row_start = ((tile_y_start + row) * width + tile_x_start) as usize * 4;
@@ -98,15 +105,18 @@ impl RoiDetector {
                 // 获取 tile 索引
                 let tile_idx = (tile_y * self.tiles_x + tile_x) as usize;
                 
+                // 存储到 current_hashes
+                self.current_hashes[tile_idx] = current_hash;
+                
                 // 比较 hash
                 if self.prev_hashes[tile_idx] != current_hash {
                     changed_tiles.push((tile_x, tile_y));
                 }
-                
-                // 更新 prev_hashes
-                self.prev_hashes[tile_idx] = current_hash;
             }
         }
+        
+        // 交换缓冲区：current -> prev，避免分配新内存
+        std::mem::swap(&mut self.current_hashes, &mut self.prev_hashes);
         
         // 合并相邻的变化 tile
         Self::merge_tiles(changed_tiles, self.tile_size)

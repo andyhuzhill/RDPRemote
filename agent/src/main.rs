@@ -153,9 +153,15 @@ async fn run_agent(args: Args) -> Result<()> {
     let mut adaptive = AdaptiveController::new();
     let mut frame_count = 0u64;
     let mut frame_interval = std::time::Duration::from_millis(33);
+    
+    // 预分配编码输出缓冲区，避免每帧分配
+    let mut encoded_buffer = Vec::with_capacity(1024 * 1024);  // 1MB
 
     loop {
         let start = std::time::Instant::now();
+        
+        // 复用 encoded_buffer
+        encoded_buffer.clear();
 
         // 获取当前带宽层级并调整帧间隔
         let tier = adaptive.current_tier();
@@ -165,7 +171,8 @@ async fn run_agent(args: Args) -> Result<()> {
             Ok(frame) => {
                 match encoder.encode(&frame.data, frame.width, frame.height, frame.timestamp_us) {
                     Ok(encoded) => {
-                        let _ = peer.send_video_frame(encoded.data, 33_333, encoded.is_keyframe).await;
+                        encoded_buffer.extend_from_slice(&encoded.data);
+                        let _ = peer.send_video_frame(encoded_buffer.clone(), 33_333, encoded.is_keyframe).await;
                         adaptive.add_bytes_sent(encoded.data.len() as u64);
                     }
                     Err(e) => tracing::warn!("Encode error: {}", e),

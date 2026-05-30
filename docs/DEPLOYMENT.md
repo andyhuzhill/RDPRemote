@@ -260,25 +260,12 @@ kubectl logs -f deployment/rdpremove-signaling -n rdpremove
 cargo build --release -p rdp-server
 cargo build --release -p rdp-client
 
-# Windows Agent (从 Linux 交叉编译)
-# 1. 添加 Windows 目标
-rustup target add x86_64-pc-windows-msvc
-
-# 2. 安装交叉编译工具
-sudo apt install mingw-w64
-
-# 3. 配置链接器 (在 .cargo/config.toml 中)
-# [target.x86_64-pc-windows-msvc]
-# linker = "x86_64-w64-mingw32-gcc"
-
-# 4. 编译
-cargo build --release -p rdp-agent --target x86_64-pc-windows-msvc
-
-# Windows Agent (在 Windows 上编译)
+# Windows Agent (在 Windows 上编译 - 推荐)
 cargo build --release -p rdp-agent
 
-# macOS 控制端
-cargo build --release -p rdp-client
+# Windows Agent (从 Linux 交叉编译 - 需要额外配置)
+# 注意：libvpx-sys 需要 Windows SDK 和 MSVC 工具链
+# 推荐在 Windows 上编译或使用 GitHub Actions
 ```
 
 ### Windows Agent 安装

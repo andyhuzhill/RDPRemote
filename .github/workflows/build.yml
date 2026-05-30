@@ -1,0 +1,53 @@
+name: Build Windows Agent
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build Agent
+      run: cargo build --release -p rdp-agent
+      
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdp-agent-windows
+        path: target/release/rdp-agent.exe
+        
+  build-linux:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build Server
+      run: cargo build --release -p rdp-server
+      
+    - name: Build Client
+      run: cargo build --release -p rdp-client
+      
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdp-server-linux
+        path: target/release/rdp-server
+        
+    - uses: actions/upload-artifact@v4
+      with:
+        name: rdp-client-linux
+        path: target/release/rdp-client

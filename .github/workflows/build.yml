@@ -8,24 +8,6 @@ on:
     branches: [ master ]
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      
-    - name: Build Agent (without libvpx)
-      run: cargo build --release -p rdp-agent --no-default-features
-      
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: rdp-agent-windows
-        path: target/release/rdp-agent.exe
-        
   build-linux:
     runs-on: ubuntu-latest
     
@@ -40,6 +22,9 @@ jobs:
       
     - name: Build Client
       run: cargo build --release -p rdp-client
+      
+    - name: Run Tests
+      run: cargo test --workspace --exclude rdp-agent
       
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4

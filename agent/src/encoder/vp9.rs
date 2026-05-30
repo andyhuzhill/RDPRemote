@@ -373,41 +373,66 @@ impl VideoEncoder for VP9Encoder {
 /// Convert BGRA frame to I420 planar format
 /// BGRA: 4 bytes per pixel (B, G, R, A)
 /// I420: Y plane (width*height) + U plane (width/2*height/2) + V plane (width/2*height/2)
+///
+/// Uses integer fixed-point arithmetic (16-bit, scale=65536) for BT.601 conversion.
+/// This avoids floating-point operations for better performance.
 fn bgra_to_i420(bgra: &[u8], width: u32, height: u32, i420: &mut [u8]) -> Result<()> {
+    // Fixed-point constants (16-bit, scale = 2^16 = 65536)
+    // Y = 0.299*R + 0.587*G + 0.114*B
+    const FP_Y_R: i32 = 19595;  // round(0.299 * 65536)
+    const FP_Y_G: i32 = 38470;  // round(0.587 * 65536)
+    const FP_Y_B: i32 =  7471;  // round(0.114 * 65536)
+    // Sum check: 19595 + 38470 + 7471 = 65536 ✓
+
+    // U = 0.492*(B - Y) + 128  →  FP_U_B = round(0.492 * 65536) = 32244
+    const FP_U_B: i32 = 32244;
+
+    // V = 0.877*(R - Y) + 128  →  FP_V_R = round(0.877 * 65536) = 57495
+    const FP_V_R: i32 = 57495;
+
+    const FP_HALF: i32 = 32768; // scale / 2 for rounding
+    const FP_128: i32 = 8355840; // 128 * 65536
+
     let width_usize = width as usize;
     let height_usize = height as usize;
     let y_size = width_usize * height_usize;
     let uv_size = (width_usize / 2) * (height_usize / 2);
-    
+
     // Use split_at_mut to avoid overlapping borrows
     let (y_plane, rest) = i420.split_at_mut(y_size);
     let (u_plane, v_plane) = rest.split_at_mut(uv_size);
 
     // Convert each pixel
     for y in 0..height_usize {
+        let row_offset = y * width_usize;
+        let y_row_offset = row_offset;
+        let uv_row = y / 2;
+        let uv_row_offset = uv_row * (width_usize / 2);
+
         for x in 0..width_usize {
-            let bgra_idx = (y * width_usize + x) * 4;
-            let y_idx = y * width_usize + x;
+            let bgra_idx = row_offset * 4 + x * 4;
+            let y_idx = y_row_offset + x;
 
-            let b = bgra[bgra_idx] as f32;
-            let g = bgra[bgra_idx + 1] as f32;
-            let r = bgra[bgra_idx + 2] as f32;
+            let b = bgra[bgra_idx] as i32;
+            let g = bgra[bgra_idx + 1] as i32;
+            let r = bgra[bgra_idx + 2] as i32;
 
-            // Convert to YUV (BT.601)
-            // Y = 0.299*R + 0.587*G + 0.114*B
-            // U = 0.492*(B - Y) + 128
-            // V = 0.877*(R - Y) + 128
-            let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-            let u_val = (0.492 * (b - y_val as f32) + 128.0) as u8;
-            let v_val = (0.877 * (r - y_val as f32) + 128.0) as u8;
+            // Y = (FP_Y_R * R + FP_Y_G * G + FP_Y_B * B + FP_HALF) >> 16
+            let y_fp = (FP_Y_R * r + FP_Y_G * g + FP_Y_B * b + FP_HALF) >> 16;
+            let y_val = y_fp as u8;
 
             y_plane[y_idx] = y_val;
 
-            // Chroma subsampling (4:2:0)
-            if x % 2 == 0 && y % 2 == 0 {
-                let uv_idx = (y / 2) * (width_usize / 2) + x / 2;
-                u_plane[uv_idx] = u_val;
-                v_plane[uv_idx] = v_val;
+            // Chroma subsampling (4:2:0): only compute for even x and even y
+            if (x & 1) == 0 && (y & 1) == 0 {
+                // U = (FP_U_B * (B - Y) + FP_HALF + FP_128) >> 16
+                let u_fp = (FP_U_B * (b - y_fp) + FP_HALF + FP_128) >> 16;
+                // V = (FP_V_R * (R - Y) + FP_HALF + FP_128) >> 16
+                let v_fp = (FP_V_R * (r - y_fp) + FP_HALF + FP_128) >> 16;
+
+                let uv_idx = uv_row_offset + (x >> 1);
+                u_plane[uv_idx] = u_fp as u8;
+                v_plane[uv_idx] = v_fp as u8;
             }
         }
     }

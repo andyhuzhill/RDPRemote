@@ -26,6 +26,31 @@ clap = { version = "4", features = ["derive"] }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[test]]
+name = "signaling_test"
+path = "tests/signaling_test.rs"
+
+[[test]]
+name = "webrtc_test"
+path = "tests/webrtc_test.rs"
+
+[[test]]
+name = "pipeline_test"
+path = "tests/pipeline_test.rs"
+
+[[bench]]
+name = "encoder_bench"
+path = "benches/encoder_bench.rs"
+harness = false
+
+[[bench]]
+name = "roi_bench"
+path = "benches/roi_bench.rs"
+harness = false
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Graphics_Dxgi",

@@ -256,14 +256,45 @@ kubectl logs -f deployment/rdpremove-signaling -n rdpremove
 ### 编译 Release 版本
 
 ```bash
-# Linux
+# Linux (信令服务器 + 控制端)
 cargo build --release -p rdp-server
+cargo build --release -p rdp-client
 
-# Windows (cross-compile from Linux)
+# Windows Agent (从 Linux 交叉编译)
+# 1. 添加 Windows 目标
+rustup target add x86_64-pc-windows-msvc
+
+# 2. 安装交叉编译工具
+sudo apt install mingw-w64
+
+# 3. 配置链接器 (在 .cargo/config.toml 中)
+# [target.x86_64-pc-windows-msvc]
+# linker = "x86_64-w64-mingw32-gcc"
+
+# 4. 编译
 cargo build --release -p rdp-agent --target x86_64-pc-windows-msvc
 
-# macOS
+# Windows Agent (在 Windows 上编译)
+cargo build --release -p rdp-agent
+
+# macOS 控制端
 cargo build --release -p rdp-client
+```
+
+### Windows Agent 安装
+
+```powershell
+# 1. 复制二进制文件
+copy target\release\rdp-agent.exe C:\RDPRemote\
+
+# 2. 创建配置文件
+echo server=ws://your-server:8765 > C:\RDPRemote\config.ini
+echo device_id=my-windows-pc >> C:\RDPRemote\config.ini
+
+# 3. 注册为 Windows 服务 (使用 NSSM)
+nssm install RDPRemoteAgent C:\RDPRemote\rdp-agent.exe
+nssm set RDPRemoteAgent AppParameters --server ws://your-server:8765 --device-id my-windows-pc
+nssm start RDPRemoteAgent
 ```
 
 ### systemd 服务配置
@@ -319,6 +350,21 @@ sudo systemctl status rdpremove-server
 ---
 
 ## 网络配置
+
+### 交叉编译配置
+
+在项目根目录创建 `.cargo/config.toml`：
+
+```toml
+# Windows MSVC 目标配置
+[target.x86_64-pc-windows-msvc]
+linker = "x86_64-w64-mingw32-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# 可选：使用 LLVM lld 加速链接
+# [target.x86_64-pc-windows-msvc]
+# linker = "rust-lld"
+```
 
 ### 防火墙规则
 

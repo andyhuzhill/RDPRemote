@@ -14,8 +14,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+    - name: Install Rust 1.79
+      uses: dtolnay/rust-toolchain@1.79
       
     - name: Build Agent
       run: cargo build --release -p rdp-agent

@@ -14,3 +14,20 @@ serde_json = "1"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+debug = false
+panic = "abort"
+
+[profile.release.package."rdp-agent"]
+opt-level = "z"  # Optimize for size on agent (Windows)
+
+[profile.release.package."rdp-client"]
+opt-level = 3
+
+[profile.release.package."rdp-server"]
+opt-level = 3

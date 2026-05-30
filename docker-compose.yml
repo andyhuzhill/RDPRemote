@@ -1,0 +1,92 @@
+# RDPRemote Docker Compose Configuration
+# Orchestrate signaling server and client services
+
+version: "3.9"
+
+services:
+  # Signaling server - WebRTC signaling endpoint
+  rdp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: rdpremove-server:latest
+    container_name: rdpremove-signaling
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data/server:/app/data
+    environment:
+      - RUST_LOG=info
+      - SIGNALING_PORT=8765
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8765/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - rdpremove-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Optional: Client service (for headless client scenarios)
+  rdp-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: rdpremove-client:latest
+    container_name: rdpremove-client
+    restart: "no"  # Manual start
+    entrypoint: ["./rdp-client"]
+    command: ["--help"]  # Override with actual args
+    volumes:
+      - ./data/client:/app/data
+    environment:
+      - RUST_LOG=info
+      - SIGNALING_SERVER=rdp-server:8765
+    depends_on:
+      rdp-server:
+        condition: service_healthy
+    networks:
+      - rdpremove-network
+    profiles:
+      - client  # Run with: docker-compose --profile client up
+
+  # Development environment with hot reload
+  rdp-server-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: rdpremove-server-dev:latest
+    container_name: rdpremove-signaling-dev
+    ports:
+      - "8766:8765"
+    volumes:
+      - .:/app
+      - cargo-cache:/app/target
+    environment:
+      - RUST_LOG=debug
+    networks:
+      - rdpremove-network
+    profiles:
+      - dev  # Run with: docker-compose --profile dev up
+
+networks:
+  rdpremove-network:
+    driver: bridge
+    name: rdpremove-network
+
+volumes:
+  cargo-cache:
+    name: rdpremove-cargo-cache
+  data:
+    name: rdpremove-data

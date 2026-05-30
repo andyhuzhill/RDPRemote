@@ -53,14 +53,21 @@ async fn main() -> Result<()> {
 
 #[cfg(target_os = "windows")]
 async fn run_agent(args: Args) -> Result<()> {
+    // 生成设备代码和密码
+    let device_code = format!("RDPR-{:06}", rand::thread_rng().gen_range(0..1000000));
+    let password = DeviceAuthManager::generate_password();
+
+    // 显示设备信息
+    println!("╔══════════════════════════════════════╗");
+    println!("║       RDPRemote 被控端               ║");
+    println!("╠══════════════════════════════════════╣");
+    println!("║  设备代码: {:<26} ║", device_code);
+    println!("║  连接密码: {:<26} ║", password);
+    println!("╚══════════════════════════════════════╝");
+
     // 初始化认证管理器
     let auth_manager = std::sync::Arc::new(DeviceAuthManager::new());
-    let password = DeviceAuthManager::generate_password();
-    auth_manager.register_device(args.device_id.clone(), password.clone()).await;
-    
-    // 显示密码
-    tracing::info!("设备代码: {}", args.device_id);
-    tracing::info!("连接密码: {}", password);
+    auth_manager.register_device(device_code.clone(), password.clone()).await;
 
     // 初始化屏幕捕获
     let mut capture = D3D11ScreenCapture::new().context("Failed to init screen capture")?;

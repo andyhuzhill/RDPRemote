@@ -4,6 +4,7 @@
 //! WebRTC peer connections and sending video frames.
 
 use std::sync::Arc;
+use bytes::{Bytes, BytesMut};
 use webrtc::{
     api::APIBuilder,
     peer_connection::{
@@ -26,6 +27,7 @@ use crate::webrtc::{Error, Result};
 pub struct AgentPeer {
     peer_connection: Arc<RTCPeerConnection>,
     video_track: Arc<TrackLocalStaticSample>,
+    frame_buffer: BytesMut,  // 复用缓冲区，减少内存分配
 }
 
 impl AgentPeer {
@@ -120,6 +122,7 @@ impl AgentPeer {
         Ok(Self {
             peer_connection: Arc::new(peer_connection),
             video_track,
+            frame_buffer: BytesMut::with_capacity(1024 * 1024),  // 1MB 初始容量
         })
     }
 
@@ -160,20 +163,22 @@ impl AgentPeer {
         Ok(())
     }
 
-    /// Send a video frame over the WebRTC connection
+    /// Send a video frame over the WebRTC connection (zero-copy with Bytes)
     ///
     /// # Arguments
-    /// * `data` - The encoded video frame data (e.g., VP8/VP9)
+    /// * `data` - The encoded video frame data as Bytes (zero-copy)
     /// * `duration_us` - Frame duration in microseconds
     /// * `is_keyframe` - Whether this is a keyframe (I-frame)
-    pub async fn send_video_frame(
+    ///
+    /// This is the recommended method for zero-copy frame transmission.
+    pub async fn send_video_frame_bytes(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         duration_us: u64,
         _is_keyframe: bool,
     ) -> Result<()> {
         let sample = Sample {
-            data: bytes::Bytes::from(data),
+            data,  // 零拷贝：直接传递 Bytes，无需复制
             duration: std::time::Duration::from_micros(duration_us),
             ..Default::default()
         };
@@ -184,6 +189,58 @@ impl AgentPeer {
             .map_err(|e| Error::Send(format!("Failed to write sample: {}", e)))?;
 
         Ok(())
+    }
+
+    /// Send a video frame using buffer reuse (zero-copy when possible)
+    ///
+    /// This method reuses the internal buffer to minimize allocations.
+    /// For best performance, call `clear_buffer` periodically.
+    ///
+    /// # Arguments
+    /// * `data` - The encoded video frame data as slice
+    /// * `duration_us` - Frame duration in microseconds
+    /// * `is_keyframe` - Whether this is a keyframe (I-frame)
+    pub async fn send_video_frame_reuse(
+        &mut self,
+        data: &[u8],
+        duration_us: u64,
+        is_keyframe: bool,
+    ) -> Result<()> {
+        // 复用缓冲区：将数据写入缓冲区
+        self.frame_buffer.clear();
+        self.frame_buffer.extend_from_slice(data);
+        
+        // 冻结缓冲区并转换为 Bytes（零拷贝）
+        let bytes = self.frame_buffer.split().freeze();
+        
+        // 重新分配缓冲区（如果需要）
+        if self.frame_buffer.capacity() < data.len() {
+            self.frame_buffer = BytesMut::with_capacity(data.len().max(1024 * 1024));
+        }
+        
+        self.send_video_frame_bytes(bytes, duration_us, is_keyframe).await
+    }
+
+    /// Clear and reset the frame buffer
+    pub fn clear_buffer(&mut self) {
+        self.frame_buffer.clear();
+    }
+
+    /// Send a video frame over the WebRTC connection (legacy API)
+    ///
+    /// # Arguments
+    /// * `data` - The encoded video frame data (e.g., VP8/VP9)
+    /// * `duration_us` - Frame duration in microseconds
+    /// * `is_keyframe` - Whether this is a keyframe (I-frame)
+    ///
+    /// For zero-copy performance, use `send_video_frame_bytes` instead.
+    pub async fn send_video_frame(
+        &self,
+        data: Vec<u8>,
+        duration_us: u64,
+        is_keyframe: bool,
+    ) -> Result<()> {
+        self.send_video_frame_bytes(Bytes::from(data), duration_us, is_keyframe).await
     }
 
     /// Add an ICE candidate received from the remote peer

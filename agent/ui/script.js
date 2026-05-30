@@ -8,6 +8,7 @@ const $$ = (selector) => document.querySelectorAll(selector);
 
 // 默认设置
 const DEFAULT_SETTINGS = {
+    serverUrl: 'ws://localhost:8765',
     autoReconnect: true,
     maxReconnectAttempts: 5,
     reconnectDelay: 3,
@@ -52,6 +53,7 @@ function resetSettings() {
 
 // 将设置应用到 UI
 function applySettingsToUI() {
+    $('#setting-server-url').value = currentSettings.serverUrl;
     $('#setting-auto-reconnect').checked = currentSettings.autoReconnect;
     $('#setting-max-reconnect-attempts').value = currentSettings.maxReconnectAttempts;
     $('#setting-reconnect-delay').value = currentSettings.reconnectDelay;
@@ -66,6 +68,7 @@ function applySettingsToUI() {
 // 从 UI 获取设置
 function getSettingsFromUI() {
     return {
+        serverUrl: $('#setting-server-url').value || 'ws://localhost:8765',
         autoReconnect: $('#setting-auto-reconnect').checked,
         maxReconnectAttempts: parseInt($('#setting-max-reconnect-attempts').value) || 5,
         reconnectDelay: parseInt($('#setting-reconnect-delay').value) || 3,

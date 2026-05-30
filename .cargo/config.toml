@@ -1,0 +1,18 @@
+# Cargo 配置 - 交叉编译设置
+
+# Windows MSVC 目标 (从 Linux 交叉编译)
+[target.x86_64-pc-windows-msvc]
+linker = "x86_64-w64-mingw32-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# 可选：使用 LLVM lld 加速链接
+# [target.x86_64-pc-windows-msvc]
+# linker = "rust-lld"
+
+# Release 优化配置
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

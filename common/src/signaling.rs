@@ -41,6 +41,9 @@ pub enum SignalingMessage {
     FileTransferCancel {
         reason: String,
     },
+    // Clipboard sync messages
+    #[serde(rename = "clipboard")]
+    Clipboard { content: String },
 }
 
 /// 输入事件类型

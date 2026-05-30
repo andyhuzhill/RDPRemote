@@ -17,6 +17,30 @@ pub enum SignalingMessage {
     Error { message: String },
     #[serde(rename = "input")]
     Input { event: InputEvent },
+    // File transfer messages
+    #[serde(rename = "file-transfer-request")]
+    FileTransferRequest {
+        filename: String,
+        file_size: u64,
+    },
+    #[serde(rename = "file-transfer-accept")]
+    FileTransferAccept {
+        accepted: bool,
+    },
+    #[serde(rename = "file-transfer-data")]
+    FileTransferData {
+        chunk_index: u64,
+        data: Vec<u8>,
+        is_last: bool,
+    },
+    #[serde(rename = "file-transfer-complete")]
+    FileTransferComplete {
+        last_chunk_index: u64,
+    },
+    #[serde(rename = "file-transfer-cancel")]
+    FileTransferCancel {
+        reason: String,
+    },
 }
 
 /// 输入事件类型

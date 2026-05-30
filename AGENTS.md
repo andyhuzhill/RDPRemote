@@ -52,14 +52,35 @@ client/   → Cross-platform: WebRTC receive + wgpu render
 - `agent/src/screen/dxgi.rs` - DXGI screen capture (Windows-only)
 - `agent/src/encoder/vp9.rs` - VP9 encoder via libvpx
 - `agent/src/adaptive.rs` - Bandwidth adaptive controller
+- `agent/src/roi.rs` - Region of Interest (tile hash)
+- `agent/src/frame_skipper.rs` - Frame skipping strategy
+- `agent/src/input.rs` - Input injection (SendInput)
 - `agent/src/webrtc/peer.rs` - WebRTC sender peer
 - `client/src/webrtc/peer.rs` - WebRTC receiver peer
 - `client/src/render/wgpu_renderer.rs` - wgpu video renderer
 - `common/src/signaling.rs` - Signaling message types
+- `common/src/file_transfer.rs` - File transfer state machine
+- `common/src/clipboard.rs` - Clipboard manager
+- `server/src/auth.rs` - JWT authentication
+
+## Deployment
+
+```bash
+# Docker
+docker-compose up -d
+
+# Manual
+cargo run -p rdp-server
+cargo run -p rdp-agent -- --device-id my-pc
+cargo run -p rdp-client -- --target-agent my-pc
+```
+
+JWT secret via `JWT_SECRET` env var.
 
 ## Phase Status
 
 - Phase 1a: Core pipeline (capture → encode → WebRTC → render) ✅
 - Phase 1b: Network traversal + adaptive ✅
-- Phase 2: Low-bandwidth optimization (ROI, frame skipping) - Pending
-- Phase 3: Input injection + file transfer - Pending
+- Phase 2: Low-bandwidth optimization (ROI, frame skipping) ✅
+- Phase 3: Input injection + file transfer ✅
+- Phase 4: Production ready (JWT auth, Docker, docs) ✅

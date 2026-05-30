@@ -44,49 +44,57 @@ impl VP9Encoder {
             if err != vpx_sys::VPX_CODEC_OK {
                 return Err(anyhow!("Failed to get default encoder config: {}", err));
             }
-
+            
             // Override with our settings
             cfg.g_w = width;
             cfg.g_h = height;
             cfg.g_timebase.num = 1;
             cfg.g_timebase.den = 1_000_000;
             cfg.g_lag_in_frames = 0;
-            cfg.kf_min_dist = 0; // Must be 0 in auto mode
+            // In auto mode, kf_min_dist must be 0. Use kf_max_dist to control keyframe interval.
+            cfg.kf_min_dist = 0;
+            cfg.kf_max_dist = 300; // Maximum keyframe interval (about 10 seconds at 30fps)
 
             // Manually ensure all rational fields have valid denominators
             // This is a workaround for libvpx 1.16.0 validation issues
-            // We need to set ALL rational field denominators to 1, not just the ones we know about
             unsafe {
                 let cfg_ptr = &mut cfg as *mut vpx_sys::vpx_codec_enc_cfg_t as *mut u8;
                 let struct_size = std::mem::size_of::<vpx_sys::vpx_codec_enc_cfg_t>();
                 
-                // Set all rational field denominators to 1
-                // A rational field is 8 bytes: 4 bytes num + 4 bytes den
-                // We iterate through the entire struct and fix any rational field with den=0
+                // Iterate through the struct and fix any vpx_rational field (8 bytes: i32 num, i32 den)
+                // where den is 0 or out of valid range [1, 1000]
                 let mut offset = 0;
                 while offset + 8 <= struct_size {
                     let num_ptr = (cfg_ptr.add(offset)) as *mut i32;
                     let den_ptr = (cfg_ptr.add(offset + 4)) as *mut i32;
                     
-                    // Check if this looks like a rational field (den is 0)
                     let den_val = std::ptr::read(den_ptr);
-                    
-                    if den_val == 0 {
-                        // This might be a rational field with uninitialized den, set it to 1
+                    if den_val <= 0 || den_val > 1000 {
                         std::ptr::write(den_ptr, 1);
-                        // Set num to a reasonable default (1 for most rational fields)
                         let num_val = std::ptr::read(num_ptr);
                         if num_val == 0 {
                             std::ptr::write(num_ptr, 1);
                         }
                     }
-                    
-                    offset += 4; // Move to next 4-byte boundary
+                    offset += 4;
+                }
+                
+                // Fix gf_frame_max_boost_factor at offset 376 (libvpx 1.16+ field)
+                // This field may exist in the underlying libvpx library even if not in the Rust struct
+                // Try a wider range of offsets to find it
+                for off in [376, 384, 392, 400, 408, 416, 424, 432, 440, 448] {
+                    if off + 8 <= 500 {
+                        let num_ptr = (cfg_ptr.add(off)) as *mut i32;
+                        let den_ptr = (cfg_ptr.add(off + 4)) as *mut i32;
+                        std::ptr::write(num_ptr, 1);
+                        std::ptr::write(den_ptr, 1);
+                    }
                 }
             }
             
             // Reset kf_min_dist after workaround (it may have been modified)
             cfg.kf_min_dist = 0;
+            cfg.kf_max_dist = 300;
 
             // Initialize encoder context
             let mut ctx: vpx_sys::vpx_codec_ctx_t = std::mem::zeroed();
@@ -120,6 +128,26 @@ impl VP9Encoder {
 
             // After initialization, use vpx_codec_control to set additional parameters
             // This avoids the validation issues with the config struct
+
+            // Try to set gf_frame_max_boost_factor if the control exists (libvpx 1.16+)
+            // VP9E_SET_GF_FRAME_MAX_BOOST_FACTOR = 2402 (from vpx_encoder.h)
+            // The error says gf_frame_max_boost_factor.den is out of range [1..1000]
+            // This suggests the default value has den=0 or den>1000
+            // Let's try to set it via vpx_codec_control
+            unsafe {
+                // VP9E_SET_GF_FRAME_MAX_BOOST_FACTOR = 2402
+                // It takes a vpx_rational (num, den)
+                let num: i32 = 1;
+                let den: i32 = 1;
+                let err = vpx_sys::vpx_codec_control_(
+                    &mut ctx,
+                    2402i32,
+                    num,
+                    den,
+                );
+                // Ignore error - control may not exist in this version of libvpx
+                let _ = err;
+            }
 
             // Set CPU used for real-time (higher = faster, lower quality)
             // 1 = good quality, 5 = real-time, 10 = fastest

@@ -45,6 +45,10 @@ pub struct D3D11ScreenCapture {
     staging_texture: Option<ID3D11Texture2D>,
     /// 上次捕获的帧（用于无新帧时返回）
     last_frame: Option<CapturedFrame>,
+    /// 帧缓冲区复用池（预分配，避免每次分配）
+    frame_buffer: Vec<u8>,
+    /// 上一次使用的缓冲区（用于复用）
+    last_frame_buffer: Option<Vec<u8>>,
     /// 是否已初始化
     initialized: bool,
 }
@@ -63,6 +67,8 @@ impl D3D11ScreenCapture {
             height: 0,
             staging_texture: None,
             last_frame: None,
+            frame_buffer: Vec::new(),
+            last_frame_buffer: None,
             initialized: false,
         };
         
@@ -142,6 +148,17 @@ impl D3D11ScreenCapture {
             .output
             .DuplicateOutput(&self.device)
             .context("Failed to create output duplication")?;
+
+        // 预分配帧缓冲区（BGRA: 4 字节/像素）
+        let buffer_size = (self.width * self.height * 4) as usize;
+        self.frame_buffer = Vec::with_capacity(buffer_size);
+        self.last_frame_buffer = Some(Vec::with_capacity(buffer_size));
+
+        tracing::info!(
+            "Pre-allocated frame buffer: {} bytes ({:.2} MB)",
+            buffer_size,
+            buffer_size as f64 / (1024.0 * 1024.0)
+        );
 
         self.initialized = true;
         tracing::info!("DXGI screen capture initialized successfully");
@@ -235,15 +252,26 @@ impl ScreenCapture for D3D11ScreenCapture {
                 .context("Failed to map staging texture")?
         };
 
-        // 读取帧数据
-        let mut data = Vec::with_capacity((self.width * self.height * 4) as usize);
+        // 复用帧缓冲区，避免每次分配
+        let buffer_size = (self.width * self.height * 4) as usize;
         let row_pitch = mapped_resource.RowPitch as usize;
         let ptr = mapped_resource.pData as *const u8;
 
+        // 确保缓冲区足够大
+        if self.frame_buffer.len() < buffer_size {
+            self.frame_buffer.resize(buffer_size, 0);
+        }
+
+        // 使用 memcpy 方式高效复制行数据
         for y in 0..self.height as usize {
             let row_start = y * row_pitch;
-            for x in 0..(self.width * 4) as usize {
-                data.push(*ptr.add(row_start + x));
+            let dst_start = y * (self.width * 4) as usize;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr.add(row_start),
+                    self.frame_buffer.as_mut_ptr().add(dst_start),
+                    (self.width * 4) as usize,
+                );
             }
         }
 
@@ -259,10 +287,14 @@ impl ScreenCapture for D3D11ScreenCapture {
             self.duplication.ReleaseFrame()?;
         }
 
+        // 复用 last_frame_buffer 避免重复分配
+        let frame_data = std::mem::replace(&mut self.frame_buffer, self.last_frame_buffer.take().unwrap_or_default());
+        self.last_frame_buffer = Some(frame_data.clone());
+
         let frame = CapturedFrame {
             width: self.width,
             height: self.height,
-            data,
+            data: frame_data,
             stride: self.width * 4,
             timestamp_us: Self::get_timestamp_us(),
         };

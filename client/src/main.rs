@@ -19,6 +19,9 @@ struct Args {
 
     #[arg(short, long, required = true)]
     target_agent: String,
+
+    #[arg(short, long, required = true)]
+    password: String,  // 新增密码参数
 }
 
 #[tokio::main]
@@ -49,6 +52,33 @@ async fn run_client(args: Args) -> Result<()> {
         device_id: args.device_id.clone(),
     })?;
     ws_tx.send(Message::Text(reg.into())).await?;
+
+    // 发送认证请求
+    let auth_msg = SignalingMessage::AuthRequest {
+        device_id: args.device_id.clone(),
+        password: args.password.clone(),
+    };
+    ws_tx.send(Message::Text(serde_json::to_string(&auth_msg)?.into())).await?;
+
+    // 等待认证响应
+    match ws_rx.next().await {
+        Some(Ok(Message::Text(text))) => {
+            let response: SignalingMessage = serde_json::from_str(&text)?;
+            match response {
+                SignalingMessage::AuthResponse { success: true, .. } => {
+                    tracing::info!("认证成功");
+                }
+                SignalingMessage::AuthResponse { success: false, message } => {
+                    tracing::error!("认证失败: {:?}", message);
+                    return Err(anyhow::anyhow!("认证失败"));
+                }
+                _ => {
+                    return Err(anyhow::anyhow!("unexpected response"));
+                }
+            }
+        }
+        _ => return Err(anyhow::anyhow!("认证响应接收失败")),
+    }
 
     // 发送连接请求
     let conn = serde_json::to_string(&SignalingMessage::Connect {

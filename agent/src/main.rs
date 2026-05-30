@@ -9,6 +9,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 #[cfg(target_os = "windows")]
 use rdp_agent::adaptive::{AdaptiveController, BandwidthTier};
 #[cfg(target_os = "windows")]
+use rdp_agent::auth::DeviceAuthManager;
+#[cfg(target_os = "windows")]
 use rdp_agent::encoder::VP9Encoder;
 #[cfg(target_os = "windows")]
 use rdp_agent::screen::{D3D11ScreenCapture, ScreenCapture};
@@ -51,6 +53,15 @@ async fn main() -> Result<()> {
 
 #[cfg(target_os = "windows")]
 async fn run_agent(args: Args) -> Result<()> {
+    // 初始化认证管理器
+    let auth_manager = std::sync::Arc::new(DeviceAuthManager::new());
+    let password = DeviceAuthManager::generate_password();
+    auth_manager.register_device(args.device_id.clone(), password.clone()).await;
+    
+    // 显示密码
+    tracing::info!("设备代码: {}", args.device_id);
+    tracing::info!("连接密码: {}", password);
+
     // 初始化屏幕捕获
     let mut capture = D3D11ScreenCapture::new().context("Failed to init screen capture")?;
     let (width, height) = capture.get_dimensions();
@@ -123,6 +134,25 @@ async fn run_agent(args: Args) -> Result<()> {
                                 let offer = peer.create_offer().await?;
                                 let msg = serde_json::to_string(&SignalingMessage::Offer { sdp: offer })?;
                                 ws_tx.send(Message::Text(msg.into())).await?;
+                            }
+                            Ok(SignalingMessage::AuthRequest { device_id, password }) => {
+                                tracing::info!("Auth request from: {}", device_id);
+                                let auth_manager = auth_manager.clone();
+                                if auth_manager.verify_password(&device_id, &password).await {
+                                    tracing::info!("Authentication successful for: {}", device_id);
+                                    let msg = serde_json::to_string(&SignalingMessage::AuthResponse { 
+                                        success: true, 
+                                        message: None 
+                                    })?;
+                                    ws_tx.send(Message::Text(msg.into())).await?;
+                                } else {
+                                    tracing::warn!("Authentication failed for: {}", device_id);
+                                    let msg = serde_json::to_string(&SignalingMessage::AuthResponse { 
+                                        success: false, 
+                                        message: Some("密码错误".to_string()) 
+                                    })?;
+                                    ws_tx.send(Message::Text(msg.into())).await?;
+                                }
                             }
                             Ok(SignalingMessage::Answer { sdp }) => {
                                 tracing::info!("Received answer");

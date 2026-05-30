@@ -187,37 +187,25 @@ fn parse_register(text: &str) -> Option<String> {
 /// 处理认证消息
 async fn handle_auth(
     text: &str,
-    auth: &AuthManager,
+    _auth: &AuthManager,
     mut tx: futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, Message>,
 ) -> Option<(String, futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, Message>)> {
     let msg: SignalingMessage = serde_json::from_str(text).ok()?;
 
     match msg {
-        SignalingMessage::Auth { token } => {
-            match auth.verify_token(&token) {
-                Ok(device_id) => {
-                    tracing::info!("Device {} authenticated", device_id);
-                    let response = SignalingMessage::AuthResponse {
-                        success: true,
-                        message: None,
-                    };
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        let _ = tx.send(Message::Text(json.into())).await;
-                    }
-                    Some((device_id, tx))
-                }
-                Err(e) => {
-                    tracing::warn!("Token verification failed: {}", e);
-                    let response = SignalingMessage::AuthResponse {
-                        success: false,
-                        message: Some("invalid token".to_string()),
-                    };
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        let _ = tx.send(Message::Text(json.into())).await;
-                    }
-                    None
-                }
+        // 支持新的密码认证格式 - server 只是透传，实际验证由 agent 端完成
+        SignalingMessage::AuthRequest { device_id, .. } => {
+            tracing::info!("Auth request for device: {}", device_id);
+            // Server 不验证密码，只是确认收到认证请求
+            // 实际密码验证由 agent 端完成
+            let response = SignalingMessage::AuthResponse {
+                success: true,
+                message: Some("请等待被控端验证".to_string()),
+            };
+            if let Ok(json) = serde_json::to_string(&response) {
+                let _ = tx.send(Message::Text(json.into())).await;
             }
+            Some((device_id, tx))
         }
         _ => {
             tracing::warn!("Expected auth message, got {:?}", msg);

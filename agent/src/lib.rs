@@ -1,6 +1,7 @@
 //! RDP Agent library
 
 pub mod adaptive;
+pub mod auth;
 pub mod clipboard;
 pub mod content_detector;
 pub mod encoder;

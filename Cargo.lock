@@ -2913,6 +2913,7 @@ dependencies = [
  "criterion",
  "futures-util",
  "libvpx-sys",
+ "rand 0.8.6",
  "rdp-common",
  "serde",
  "serde_json",
